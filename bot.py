@@ -7,7 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.enums import ChatMemberStatus
 
-# === CONFIG ===
+# === CONFIG UIT ENVIRONMENT VARIABLES ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))  # bv. -1001234567890
 PRIVATE_GROUP_LINK = os.getenv("PRIVATE_GROUP_LINK", "https://t.me/+Le8og-ss9-pkYjFk")
@@ -22,7 +22,7 @@ dp = Dispatcher()
 # Opslag in RAM
 user_invites = {}  # { user_id: {"count": int, "invite_link": str} }
 
-# === Aiogram functies ===
+# === Functie om persoonlijke invite link te maken of ophalen ===
 async def get_or_create_invite(user_id: int):
     if user_id in user_invites and "invite_link" in user_invites[user_id]:
         return user_invites[user_id]["invite_link"]
@@ -36,11 +36,13 @@ async def get_or_create_invite(user_id: int):
     return invite.invite_link
 
 
+# === Nieuwe members event ===
 @dp.chat_member()
 async def new_member(event: types.ChatMemberUpdated):
     if event.new_chat_member.status == ChatMemberStatus.MEMBER:
         inviter = event.invite_link.creator if event.invite_link else None
 
+        # Alleen tellen via persoonlijke invite link
         if inviter and inviter.id in user_invites:
             inviter_id = inviter.id
             user_invites[inviter_id]["count"] += 1
@@ -55,7 +57,7 @@ async def new_member(event: types.ChatMemberUpdated):
                 ])
                 await bot.send_message(
                     inviter_id,
-                    f"🔥 Je hebt nu {count}/2 mensen uitgenodigd!",
+                    f"🔥 Je hebt nu {count}/2 mensen uitgenodigd! Deel de link nog een keer om toegang te krijgen.",
                     reply_markup=btn
                 )
             else:
@@ -68,12 +70,14 @@ async def new_member(event: types.ChatMemberUpdated):
                     reply_markup=btn
                 )
         else:
+            # Publieke link join → negeren
             await bot.send_message(
                 GROUP_ID,
-                f"ℹ️ {event.new_chat_member.user.first_name} kwam via de publieke link (telt niet mee)."
+                f"ℹ️ {event.new_chat_member.user.first_name} is via de publieke link binnengekomen (telt niet mee voor invites)."
             )
 
 
+# === Verwijder publieke link berichten ===
 @dp.message()
 async def block_public_link(message: types.Message):
     if PUBLIC_GROUP_LINK in message.text:
@@ -81,35 +85,46 @@ async def block_public_link(message: types.Message):
             await message.delete()
             await message.answer(
                 f"🚫 De publieke invite link mag hier niet gedeeld worden!\n"
-                f"Gebruik je persoonlijke link via de bot."
+                f"Gebruik je persoonlijke link via de bot om invites te verdienen."
             )
         except Exception:
-            pass
+            pass  # Als bot geen permissies heeft
 
 
+# === /start command ===
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    invite_link = await get_or_create_invite(message.from_user.id)
+    try:
+        # Check privé chat
+        if message.chat.type != "private":
+            await message.reply("ℹ️ Stuur /start in privé chat met de bot om je persoonlijke invite link te krijgen.")
+            return
 
-    btn = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Share to unlock Instructions (0/2)", url=invite_link)]
-    ])
+        invite_link = await get_or_create_invite(message.from_user.id)
 
-    await message.answer(
-        "🚀 Share *your personal invite link* to 2 people to unlock the private group.\n\n"
-        "⚠️ Joining via the public link does not count!",
-        reply_markup=btn,
-        parse_mode="Markdown"
-    )
+        btn = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Share to unlock Instructions (0/2)", url=invite_link)]
+        ])
 
-# === FastAPI dummy server (Render verwacht een webservice) ===
+        await message.answer(
+            "🚀 Share *your personal invite link* to 2 people to unlock the private group.\n\n"
+            "⚠️ Joining via the public link does not count!",
+            reply_markup=btn,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await message.answer(f"❌ Er is een fout opgetreden: {e}")
+
+
+# === FastAPI dummy server (Render verwacht webservice) ===
 app = FastAPI()
 
 @app.get("/")
 async def root():
     return {"status": "Bot running ✅"}
 
-# Start zowel de bot als de webserver
+
+# === Start bot + webserver ===
 async def start_bot():
     print("🤖 Bot is gestart en draait op Render Web Service...")
     await dp.start_polling(bot)
