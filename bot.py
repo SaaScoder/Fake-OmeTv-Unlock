@@ -1,11 +1,13 @@
 import os
 import asyncio
+from fastapi import FastAPI
+import uvicorn
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
 from aiogram.enums import ChatMemberStatus
 
-# === CONFIG UIT ENVIRONMENT VARIABLES ===
+# === CONFIG ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))  # bv. -1001234567890
 PRIVATE_GROUP_LINK = os.getenv("PRIVATE_GROUP_LINK", "https://t.me/+Le8og-ss9-pkYjFk")
@@ -20,9 +22,8 @@ dp = Dispatcher()
 # Opslag in RAM
 user_invites = {}  # { user_id: {"count": int, "invite_link": str} }
 
-
+# === Aiogram functies ===
 async def get_or_create_invite(user_id: int):
-    """Maak of haal een persoonlijke invite link voor een gebruiker"""
     if user_id in user_invites and "invite_link" in user_invites[user_id]:
         return user_invites[user_id]["invite_link"]
 
@@ -35,13 +36,11 @@ async def get_or_create_invite(user_id: int):
     return invite.invite_link
 
 
-# === EVENT: nieuwe members in de groep ===
 @dp.chat_member()
 async def new_member(event: types.ChatMemberUpdated):
     if event.new_chat_member.status == ChatMemberStatus.MEMBER:
         inviter = event.invite_link.creator if event.invite_link else None
 
-        # Alleen tellen als via een persoonlijke invite link
         if inviter and inviter.id in user_invites:
             inviter_id = inviter.id
             user_invites[inviter_id]["count"] += 1
@@ -56,7 +55,7 @@ async def new_member(event: types.ChatMemberUpdated):
                 ])
                 await bot.send_message(
                     inviter_id,
-                    f"🔥 Je hebt nu {count}/2 mensen uitgenodigd! Deel de link nog een keer om toegang te krijgen.",
+                    f"🔥 Je hebt nu {count}/2 mensen uitgenodigd!",
                     reply_markup=btn
                 )
             else:
@@ -68,16 +67,13 @@ async def new_member(event: types.ChatMemberUpdated):
                     "🎉 Je hebt 2 invites gehaald en toegang tot de private group gekregen!",
                     reply_markup=btn
                 )
-
         else:
-            # Publieke link join → negeren
             await bot.send_message(
                 GROUP_ID,
-                f"ℹ️ {event.new_chat_member.user.first_name} is via de publieke link binnengekomen (telt niet mee voor invites)."
+                f"ℹ️ {event.new_chat_member.user.first_name} kwam via de publieke link (telt niet mee)."
             )
 
 
-# === VERWIJDER PUBLIC LINK POSTS ===
 @dp.message()
 async def block_public_link(message: types.Message):
     if PUBLIC_GROUP_LINK in message.text:
@@ -85,13 +81,12 @@ async def block_public_link(message: types.Message):
             await message.delete()
             await message.answer(
                 f"🚫 De publieke invite link mag hier niet gedeeld worden!\n"
-                f"Gebruik je persoonlijke link via de bot om invites te verdienen."
+                f"Gebruik je persoonlijke link via de bot."
             )
         except Exception:
-            pass  # als de bot geen delete-rechten heeft
+            pass
 
 
-# === COMMAND: /start in privé chat ===
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
     invite_link = await get_or_create_invite(message.from_user.id)
@@ -101,17 +96,28 @@ async def start_cmd(message: types.Message):
     ])
 
     await message.answer(
-        "🚀 Please share *your personal invite link* to 2 people to unlock the private group.\n\n"
+        "🚀 Share *your personal invite link* to 2 people to unlock the private group.\n\n"
         "⚠️ Joining via the public link does not count!",
         reply_markup=btn,
         parse_mode="Markdown"
     )
 
+# === FastAPI dummy server (Render verwacht een webservice) ===
+app = FastAPI()
 
-# === START BOT ===
-async def main():
-    print("🤖 Bot is gestart en draait op Render...")
+@app.get("/")
+async def root():
+    return {"status": "Bot running ✅"}
+
+# Start zowel de bot als de webserver
+async def start_bot():
+    print("🤖 Bot is gestart en draait op Render Web Service...")
     await dp.start_polling(bot)
 
+def start():
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_bot())
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    start()
