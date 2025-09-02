@@ -1,6 +1,5 @@
 import os
-import asyncio
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart
@@ -11,14 +10,14 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_ID = int(os.getenv("GROUP_ID"))  # bv. -1001234567890
 PRIVATE_GROUP_LINK = os.getenv("PRIVATE_GROUP_LINK", "https://t.me/+Le8og-ss9-pkYjFk")
 PUBLIC_GROUP_LINK = os.getenv("PUBLIC_GROUP_LINK", "https://t.me/myometvhack")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # bv. https://yourdomain.com/webhook
 
-if not BOT_TOKEN or not GROUP_ID:
-    raise ValueError("❌ BOT_TOKEN en GROUP_ID moeten als environment variables ingesteld zijn!")
+if not BOT_TOKEN or not GROUP_ID or not WEBHOOK_URL:
+    raise ValueError("BOT_TOKEN, GROUP_ID en WEBHOOK_URL moeten ingesteld zijn!")
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Opslag in RAM
 user_invites = {}  # {user_id: {"count": int, "invite_link": str}}
 
 # ================= Functie invite link =================
@@ -65,7 +64,6 @@ async def new_member(event: types.ChatMemberUpdated):
 @dp.message()
 async def block_public_link(message: types.Message):
     try:
-        # Check of message.text bestaat
         if message.text and PUBLIC_GROUP_LINK in message.text:
             try:
                 await message.delete()
@@ -102,12 +100,26 @@ async def start_cmd(message: types.Message):
 # ================= FastAPI app =================
 app = FastAPI()
 
-@app.on_event("startup")
-async def on_startup():
-    # Start Telegram bot als achtergrondtask
-    asyncio.create_task(dp.start_polling(bot))
-    print("🤖 Bot gestart en luistert naar updates...")
+# Telegram webhook endpoint
+@app.post("/webhook")
+async def telegram_webhook(req: Request):
+    data = await req.json()
+    update = types.Update(**data)
+    await dp.feed_update(bot, update)
+    return {"ok": True}
 
+# Root endpoint
 @app.get("/")
 async def root():
     return {"status": "Bot running ✅"}
+
+# ================= Setup webhook =================
+@app.on_event("startup")
+async def on_startup():
+    await bot.set_webhook(WEBHOOK_URL)
+    print(f"Webhook ingesteld op {WEBHOOK_URL}")
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    await bot.delete_webhook()
+    await bot.session.close()
